@@ -14,10 +14,10 @@ return new class extends Migration
         Schema::create('chat_messages', function (Blueprint $table) {
             $table->id();
             $table->bigInteger('chat_room_id');
-            $table->bigInteger('send_by_admin_id');
-            $table->bigInteger('send_by_user_id');
-            $table->string('content');
-            $table->string('messages_status');
+            $table->string('chat_message');
+            $table->bigInteger('member_id');
+            $table->tinyInteger('member_type');
+            $table->enum('message_status', ['Send','Read','Fail']);
             $table->timestamps();
         });
     }

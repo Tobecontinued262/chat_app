@@ -12,14 +12,17 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('system_accounts', function (Blueprint $table) {
-            $table->id();
+            $table->id('user_id');
+            $table->string('cognito_map_id');
             $table->string('email');
             $table->string('password');
             $table->string('name');
+            $table->string('display_name');
             $table->string('role');
-            $table->text('token');
+            //new
             $table->bigInteger('connection_id');
             $table->enum('user_status', ['Offline', 'Online']);
+
             $table->timestamps();
         });
     }

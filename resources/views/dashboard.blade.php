@@ -27,7 +27,7 @@
     <div class="col-sm-4 col-lg-3">
         <div class="card" style="height:255px; overflow-y: scroll;">
             <div class="card-header">
-                <input type="text" class="form-control" placeholder="Search User..." autocomplete="off" id="search_people" onkeyup="search_user('{{ Auth::id() }}', this.value);" />
+                <input type="text" class="form-control" placeholder="Search User..." autocomplete="off" id="search_people" onkeyup="search_user(this.value);" />
             </div>
             <div class="card-body">
                 <div id="search_people_area" class="mt-3"></div>
@@ -75,7 +75,7 @@
 
 <script>
 
-    var conn = new WebSocket('ws://10.1.44.71:8090/?id={{ auth()->user()->id }}&&member_type={{auth()->user()->member_type}}');
+    var conn = new WebSocket('ws://127.0.0.1:8090/?id={{ auth()->user()->id }}&&member_type={{auth()->user()->member_type}}');
 
     var member_id = "{{ Auth::user()->id }}";
     var member_type = "{{ Auth::user()->member_type }}";
@@ -390,7 +390,7 @@
 
                     var icon_style = '';
 
-                    if(data.message_status == 'Not Send')
+                    if(data.message_status == 'NotSend')
                     {
                         icon_style = '<span id="chat_status_'+data.chat_message_id+'" class="float-end"><i class="fas fa-check text-muted"></i></span>';
                     }
@@ -417,7 +417,6 @@
                 {
                     if(parseInt(chat_room_id) == parseInt(data.chat_room_id))
                     {
-                        console.log(chat_room_id, data.chat_room_id);
                         html += `
 				<div class="row">
                     <p>`+data.member_name+`</p>
@@ -427,7 +426,7 @@
 				</div>
 				`;
 
-                        update_message_status(data.chat_message_id, member_id, chat_room_id, 'Read');
+                        update_message_status(data.chat_message_id, member_id, chat_room_id, 'Read', member_type);
                     }
                     else
                     {
@@ -445,7 +444,7 @@
                             }
                             count_unread_message_element.innerHTML = '<span class="badge bg-primary rounded-pill">'+count_unread_message+'</span>';
 
-                            update_message_status(data.chat_message_id, data.member_id, data.chat_room_id, 'Send');
+                            update_message_status(data.chat_message_id, data.member_id, data.chat_room_id, 'Send', member_type);
                         }
                     }
 
@@ -456,7 +455,7 @@
 
                     var icon_style = '';
 
-                    if(data.message_status == 'Not Send')
+                    if(data.message_status == 'NotSend')
                     {
                         icon_style = '<span id="chat_status_'+data.chat_message_id+'" class="float-end"><i class="fas fa-check text-muted"></i></span>';
                     }
@@ -492,11 +491,11 @@
 				</div>
 				`;
 
-                        update_message_status(data.chat_message_id, member_id, chat_room_id, 'Read');
+                        update_message_status(data.chat_message_id, member_id, chat_room_id, 'Read', member_type);
                     }
                     else
                     {
-                        var count_unread_message_element = document.getElementById('user_unread_message_'+data.member_id+'');
+                        var count_unread_message_element = document.getElementById('user_unread_message_'+data.chat_room_id+'');
                         if(count_unread_message_element)
                         {
                             var count_unread_message = count_unread_message_element.textContent;
@@ -510,7 +509,7 @@
                             }
                             count_unread_message_element.innerHTML = '<span class="badge bg-primary rounded-pill">'+count_unread_message+'</span>';
 
-                            update_message_status(data.chat_message_id, data.member_id, data.chat_room_id, 'Send');
+                            update_message_status(data.chat_message_id, data.member_id, data.chat_room_id, 'Send', member_type);
                         }
                     }
 
@@ -542,19 +541,19 @@
                     {
                         var icon_style = '';
 
-                        if(data.chat_history[count].message_status == 'Not Send')
+                        if(data.chat_history[count].message_status == 'NotSend')
                         {
-                            icon_style = '<span id="chat_status_'+data.chat_history[count].chat_room_id+'" class="float-end"><i class="fas fa-check text-muted"></i></span>';
+                            icon_style = '<span id="chat_status_'+data.chat_history[count].chat_message_id+'" class="float-end"><i class="fas fa-check text-muted"></i></span>';
                         }
 
                         if(data.chat_history[count].message_status == 'Send')
                         {
-                            icon_style = '<span id="chat_status_'+data.chat_history[count].chat_room_id+'" class="float-end"><i class="fas fa-check-double text-muted"></i></span>';
+                            icon_style = '<span id="chat_status_'+data.chat_history[count].chat_message_id+'" class="float-end"><i class="fas fa-check-double text-muted"></i></span>';
                         }
 
                         if(data.chat_history[count].message_status == 'Read')
                         {
-                            icon_style = '<span class="text-primary float-end" id="chat_status_'+data.chat_history[count].chat_room_id+'"><i class="fas fa-check-double"></i></span>';
+                            icon_style = '<span class="text-primary float-end" id="chat_status_'+data.chat_history[count].chat_message_id+'"><i class="fas fa-check-double"></i></span>';
                         }
 
                         html +=`
@@ -572,7 +571,7 @@
                     {
                         if(data.chat_history[count].message_status != 'Read')
                         {
-                            update_message_status(data.chat_history[count].chat_room_id, data.chat_history[count].member_id, data.chat_history[count].chat_room_id, 'Read');
+                            update_message_status(data.chat_history[count].chat_message_id, data.chat_history[count].member_id, data.chat_history[count].chat_room_id, 'Read', data.chat_history[count].member_type);
                         }
 
                         html += `
@@ -584,7 +583,7 @@
 				</div>
 				`;
 
-                        var count_unread_message_element = document.getElementById('user_unread_message_'+data.chat_history[count].member_id+'');
+                        var count_unread_message_element = document.getElementById('user_unread_message_'+data.chat_history[count].chat_room_id+'');
 
                         if(count_unread_message_element)
                         {
@@ -596,19 +595,19 @@
                     {
                         var icon_style = '';
 
-                        if(data.chat_history[count].message_status == 'Not Send')
+                        if(data.chat_history[count].message_status == 'NotSend')
                         {
-                            icon_style = '<span id="chat_status_'+data.chat_history[count].chat_room_id+'" class="float-end"><i class="fas fa-check text-muted"></i></span>';
+                            icon_style = '<span id="chat_status_'+data.chat_history[count].chat_message_id+'" class="float-end"><i class="fas fa-check text-muted"></i></span>';
                         }
 
                         if(data.chat_history[count].message_status == 'Send')
                         {
-                            icon_style = '<span id="chat_status_'+data.chat_history[count].chat_room_id+'" class="float-end"><i class="fas fa-check-double text-muted"></i></span>';
+                            icon_style = '<span id="chat_status_'+data.chat_history[count].chat_message_id+'" class="float-end"><i class="fas fa-check-double text-muted"></i></span>';
                         }
 
                         if(data.chat_history[count].message_status == 'Read')
                         {
-                            icon_style = '<span class="text-primary float-end" id="chat_status_'+data.chat_history[count].chat_room_id+'"><i class="fas fa-check-double"></i></span>';
+                            icon_style = '<span class="text-primary float-end" id="chat_status_'+data.chat_history[count].chat_message_id+'"><i class="fas fa-check-double"></i></span>';
                         }
 
                         html +=`
@@ -626,7 +625,7 @@
                     {
                         if(data.chat_history[count].message_status != 'Read')
                         {
-                            update_message_status(data.chat_history[count].chat_room_id, data.chat_history[count].member_id, data.chat_history[count].chat_room_id, 'Read');
+                            update_message_status(data.chat_history[count].chat_message_id, data.chat_history[count].member_id, data.chat_history[count].chat_room_id, 'Read',data.chat_history[count].member_type);
                         }
 
                         html += `
@@ -638,7 +637,7 @@
 				</div>
 				`;
 
-                        var count_unread_message_element = document.getElementById('user_unread_message_'+data.chat_history[count].member_id+'');
+                        var count_unread_message_element = document.getElementById('user_unread_message_'+data.chat_history[count].chat_room_id+'');
 
                         if(count_unread_message_element)
                         {
@@ -708,22 +707,23 @@
         conn.send(JSON.stringify(data));
     }
 
-    function search_user(member_id, search_query)
+    function search_user(search_query)
     {
-        if(search_query.length > 0)
+        if(search_query.length >= 0)
         {
             var data = {
                 member_id : member_id,
                 search_query : search_query,
-                type : 'request_search_user'
+                type : 'request_connected_chat_user',
+                member_type: member_type
             };
 
             conn.send(JSON.stringify(data));
         }
-        else
-        {
-            load_unconnected_user(member_id);
-        }
+        // else
+        // {
+        //     load_unconnected_user(member_id);
+        // }
     }
 
     function send_request(element, member_id, chat_room_id)
@@ -845,22 +845,24 @@
             member_id : member_id,
             member_type : member_type,
             chat_room_id : chat_room_id,
+            // page : chat_room_id,
             type : 'request_chat_history'
         };
 
         conn.send(JSON.stringify(data));
     }
 
-    function update_message_status(chat_message_id, member_id, chat_room_id, chat_message_status)
+    function update_message_status(chat_message_id, member_id, chat_room_id, chat_message_status, member_type)
     {
         var data = {
             chat_message_id : chat_message_id,
             member_id : member_id,
+            member_type : member_type,
             chat_room_id : chat_room_id,
             chat_message_status : chat_message_status,
             type : 'update_chat_status'
         };
-
+        console.log('update_message_status, data');
         conn.send(JSON.stringify(data));
     }
 

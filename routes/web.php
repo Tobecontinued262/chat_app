@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::get('/', function () {
-    return view('welcome');
+    dd(intval('sdasd2'));
 });
 
 Route::controller(\App\Http\Controllers\SampleController::class)->group(function(){

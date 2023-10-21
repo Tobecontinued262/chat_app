@@ -11,20 +11,24 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Ratchet\MessageComponentInterface;
 use Ratchet\ConnectionInterface;
-use App\Models\User;
-use Auth;
 
 class SocketController extends Controller implements MessageComponentInterface
 {
     protected $clients;
 
+    protected $allow_ips;
+
     public function __construct()
     {
         $this->clients = new \SplObjectStorage;
+        $this->allow_ips = config('app.allow_ips');
     }
 
     public function onOpen(ConnectionInterface $conn)
     {
+        if (!$this->isValidIp($conn->remoteAddress)) {
+            return false;
+        }
         $this->clients->attach($conn);
 
         $querystring = $conn->httpRequest->getUri()->getQuery();
@@ -33,12 +37,12 @@ class SocketController extends Controller implements MessageComponentInterface
 
         if (isset($queryarray['id']) && isset($queryarray['member_type'])) {
             if ($queryarray['member_type'] == '1') {
-                System_account::where('id', $queryarray['id'])->update(['connection_id' => $conn->resourceId, 'user_status' => 'Online']);
+                System_account::where('cognito_map_id', $queryarray['id'])->update(['connection_id' => $conn->resourceId, 'user_status' => 'Online']);
                 $data['member_type'] = 1;
             }
 
             if ($queryarray['member_type'] == '0') {
-                Member_account::where('id', $queryarray['id'])->update(['connection_id' => $conn->resourceId, 'user_status' => 'Online']);
+                Member_account::where('cognito_map_id', $queryarray['id'])->update(['connection_id' => $conn->resourceId, 'user_status' => 'Online']);
                 $data['member_type'] = 0;
             }
 
@@ -53,8 +57,6 @@ class SocketController extends Controller implements MessageComponentInterface
             }
 
         }
-
-
     }
 
     public function onMessage(ConnectionInterface $conn, $msg)
@@ -80,7 +82,7 @@ class SocketController extends Controller implements MessageComponentInterface
         if (isset($data->type)) {
             switch ($data->type) {
                 case 'request_connected_chat_user':
-                    $this->responseChatRooms($data);
+                    $this->responseChatRooms($data, $conn);
                     break;
                 case 'request_send_message':
                     $this->sendMessage($data);
@@ -89,13 +91,13 @@ class SocketController extends Controller implements MessageComponentInterface
                     $this->getChatRoomHistory($data);
                     break;
                 case 'request_make_chat_room':
-                    $this->createChatRoom($data);
+                    $this->createChatRoom($data, $conn);
                     break;
                 case 'request_attachment_file':
                     $this->getAttachmentFiles($data);
                     break;
                 case 'update_chat_status':
-                    $this->updateChatStatus($data);
+                    $this->updateChatStatus($data,$conn);
                     break;
                 case 'check_unread_message':
                     $this->checkUnReadMessages($data);
@@ -232,7 +234,7 @@ class SocketController extends Controller implements MessageComponentInterface
 //
 //                $chat->chat_message = $data->message;
 //
-//                $chat->message_status = 'Not Send';
+//                $chat->message_status = 'NotSend';
 //
 //                $chat->save();
 //
@@ -262,7 +264,7 @@ class SocketController extends Controller implements MessageComponentInterface
 //                        }
 //                        else
 //                        {
-//                            $send_data['message_status'] = 'Not Send';
+//                            $send_data['message_status'] = 'NotSend';
 //                        }
 //
 //                        $client->send(json_encode($send_data));
@@ -354,7 +356,7 @@ class SocketController extends Controller implements MessageComponentInterface
         }
     }
 
-    private function createChatRoom($data)
+    private function createChatRoom($data, $conn)
     {
         $check_member = Chat_member::query()->where('member_id', $data->user_id)->where('member_type', '=', 0)->first();
         if (empty($check_member)) {
@@ -365,6 +367,10 @@ class SocketController extends Controller implements MessageComponentInterface
             $chat_room->updated_at = now();
             $chat_room->save();
 
+//            $connections = array();
+//            $user = Member_account::find($data->user_id);
+//            $connections[] = $user->connection_id;
+
             $chat_member = new Chat_member;
             $chat_member->chat_room_id = $chat_room->id;
             $chat_member->member_id = $data->user_id;
@@ -372,22 +378,23 @@ class SocketController extends Controller implements MessageComponentInterface
             $chat_member->save();
 
             $admins = System_account::all();
-
             foreach ($admins as $admin) {
                 $chat_member = new Chat_member;
                 $chat_member->chat_room_id = $chat_room->id;
-                $chat_member->member_id = $admin->id;
+                $chat_member->member_id = $admin->user_id;
                 $chat_member->member_type = 1;
                 $chat_member->save();
+
+//                $connections[] = $admin->connection_id;
             }
             $chat_room_id = $chat_room->id;
         } else {
             $chat_room_id = $check_member->chat_room_id;
         }
-        $this->getChatRooms($data, $sender_connection_id, $sub_data);
-
+        $this->getChatRooms($data, $sub_data);
+//        Log::info(json_encode($connections));
         foreach ($this->clients as $client) {
-            if ($client->resourceId == $sender_connection_id->connection_id) {
+            if ($client->resourceId == $conn->resourceId) {
                 $send_data['response_create_chat_room'] = true;
                 $send_data['data'] = $sub_data;
                 $send_data['chat_room_id'] = $chat_room_id;
@@ -396,10 +403,9 @@ class SocketController extends Controller implements MessageComponentInterface
         }
     }
 
-    private function getChatRooms($data, &$sender_connection_id, &$sub_data)
+    private function getChatRooms($data, &$sub_data)
     {
         if ($data->member_type == 0) {
-            $sender_connection_id = Member_account::select('connection_id')->where('id', $data->member_id)->first();
             $user_id_data = Chat_room::query()->select('id', 'room_name', 'status')
                 ->whereHas('chat_members', function ($query) use ($data) {
                     $query->where('member_id', $data->member_id);
@@ -418,15 +424,22 @@ class SocketController extends Controller implements MessageComponentInterface
         }
 
         if ($data->member_type == 1) {
-            $sender_connection_id = System_account::select('connection_id')->where('id', $data->member_id)->first();
             $users = Member_account::query()
                 ->leftJoin('member_account_attributes', 'member_accounts.id', '=', 'member_account_attributes.member_account_id')
-                ->leftJoin('chat_members', function($query) {
+                ->leftJoin('chat_members', function ($query) {
                     $query->on('member_accounts.id', '=', 'chat_members.member_id');
                     $query->where('chat_members.member_type', '=', 0);
-                })
+                });
 //                ->leftJoin('chat_rooms', 'chat_members.chat_room_id', '=', 'chat_rooms.id')
-                ->select('member_accounts.id as member_id', 'member_accounts.user_status',
+            if (isset($data->search_query)){
+                if (intval($data->search_query) == 0) {
+                    $users = $users->where('member_account_attributes.member_name', 'like', '%'.$data->search_query.'%');
+                } else {
+                    $users = $users->where('member_account_attributes.member_name', 'like', '%'.$data->search_query.'%');
+                    $users = $users->orWhere('member_accounts.id', '=', intval($data->search_query));
+                }
+            }
+            $users = $users->select('member_accounts.id as member_id', 'member_accounts.user_status',
                     'member_account_attributes.member_name', 'chat_members.chat_room_id')
                 ->get();
 
@@ -443,15 +456,14 @@ class SocketController extends Controller implements MessageComponentInterface
         }
     }
 
-    private function responseChatRooms($data)
+    private function responseChatRooms($data, $conn)
     {
-        $sender_connection_id = null;
         $sub_data = array();
 
-        $this->getChatRooms($data, $sender_connection_id, $sub_data);
+        $this->getChatRooms($data, $sub_data);
 
         foreach ($this->clients as $client) {
-            if ($client->resourceId == $sender_connection_id->connection_id) {
+            if ($client->resourceId == $conn->resourceId) {
                 $send_data['response_connected_chat_user'] = true;
                 $send_data['data'] = $sub_data;
                 $client->send(json_encode($send_data));
@@ -468,60 +480,18 @@ class SocketController extends Controller implements MessageComponentInterface
         $chat_message->member_id = $data->member_id;
         $chat_message->member_type = $data->member_type;
         $chat_message->chat_message = $data->chat_message;
-        $chat_message->message_status = 'Not Send';
+        $chat_message->message_status = 'NotSend';
         $chat_message->created_at = now();
         $chat_message->updated_at = now();
         $chat_message->save();
         $chat_message_id = $chat_message->id;
 
-        $members = Chat_member::query()->select('member_id','member_type')->where('chat_room_id', $data->chat_room_id);
-        if ($data->member_type == 1) {
-            $members = $members->where('member_id', '!=', $data->member_id);
-        }
-        $members = $members->get();
-        $admins = array();
-        $user = 0;
-        foreach ($members as $member) {
-            if ($data->member_type == 0) {
-                if ($member->member_type == 1) {
-                    $admins[] = $member->member_id;
-                }
-            }
-            if ($data->member_type == 1) {
-                if ($member->member_type == 1) {
-                    $admins[] = $member->member_id;
-                }
-                if ($member->member_type == 0) {
-                    $user = $member->member_id;
-                }
-            }
-        }
+
         $receiver_connection_id = [];
         $sender_connection_id = null;
-        if ($data->member_type == 0) {
-            $sender_connection_id = Member_account::select('member_accounts.connection_id', 'member_account_attributes.member_name as member_name')
-                ->leftJoin('member_account_attributes','member_accounts.id','=','member_account_attributes.member_account_id')
-                ->where('id', $data->member_id)->first();
-
-            $receiver_connections = System_account::select('connection_id')->whereIn('id', $admins)->get();
-            foreach ($receiver_connections as $receiver_connection) {
-                $receiver_connection_id[] = $receiver_connection->connection_id;
-            }
-        }
-        if ($data->member_type == 1) {
-            $sender_connection_id = System_account::select('connection_id','name as member_name')->where('id', $data->member_id)->first();
-
-            $admin_connections = System_account::select('connection_id')->whereIn('id', $admins)->get();
-            $user_connection_id = Member_account::select('connection_id')->where('id', $user)->first();
-
-            foreach ($admin_connections as $admin_connection) {
-                $receiver_connection_id[] = $admin_connection->connection_id;
-            }
-            $receiver_connection_id[] = $user_connection_id->connection_id;
-        }
-
+        $this->getChatMembers($data, $receiver_connection_id, $sender_connection_id);
         foreach ($this->clients as $client) {
-            if (in_array($client->resourceId, $receiver_connection_id) || $client->resourceId == $sender_connection_id->connection_id) {
+            if (in_array($client->resourceId, $receiver_connection_id)) {
                 $send_data['chat_message_id'] = $chat_message_id;
 
                 $send_data['chat_message'] = $data->chat_message;
@@ -537,7 +507,7 @@ class SocketController extends Controller implements MessageComponentInterface
 
                     $send_data['message_status'] = 'Send';
                 } else {
-                    $send_data['message_status'] = 'Not Send';
+                    $send_data['message_status'] = 'NotSend';
                 }
 
                 $client->send(json_encode($send_data));
@@ -545,18 +515,49 @@ class SocketController extends Controller implements MessageComponentInterface
         }
     }
 
+    protected function getChatMembers($data, &$receiver_connection_id, &$sender_connection_id)
+    {
+        $members = Chat_member::query()->select('member_id', 'member_type')->where('chat_room_id', $data->chat_room_id)->get();
+        $admins = array();
+        $user = 0;
+        foreach ($members as $member) {
+            if ($member->member_type == 1) {
+                $admins[] = $member->member_id;
+            }
+            if ($member->member_type == 0) {
+                $user = $member->member_id;
+            }
+        }
+        if ($data->member_type == 0) {
+            $sender_connection_id = Member_account::select('member_accounts.connection_id', 'member_account_attributes.member_name as member_name')
+                ->leftJoin('member_account_attributes', 'member_accounts.id', '=', 'member_account_attributes.member_account_id')
+                ->where('id', $data->member_id)->first();
+        }
+        if ($data->member_type == 1) {
+            $sender_connection_id = System_account::select('connection_id', 'name as member_name')->where('user_id', $data->member_id)->first();
+        }
+
+        $admin_connections = System_account::select('connection_id')->whereIn('user_id', $admins)->get();
+        $user_connection_id = Member_account::select('connection_id')->where('id', $user)->first();
+
+        foreach ($admin_connections as $admin_connection) {
+            $receiver_connection_id[] = $admin_connection->connection_id;
+        }
+        $receiver_connection_id[] = $user_connection_id->connection_id;
+    }
+
     private function getChatRoomHistory($data)
     {
         $chat_data = Chat_message::query()
             ->leftJoin('system_accounts', function ($join) {
-                $join->on('chat_messages.member_id', '=', 'system_accounts.id');
+                $join->on('chat_messages.member_id', '=', 'system_accounts.user_id');
             })
             ->leftJoin('member_accounts', function ($join) {
                 $join->on('chat_messages.member_id', '=', 'member_accounts.id');
             })
             ->leftJoin('member_account_attributes', 'member_account_attributes.member_account_id', '=', 'member_accounts.id')
             ->where('chat_messages.chat_room_id', $data->chat_room_id)
-            ->select('chat_messages.id', 'chat_messages.chat_room_id',
+            ->select('chat_messages.id as chat_message_id', 'chat_messages.chat_room_id',
                 'chat_messages.member_id', 'chat_messages.member_type',
                 'chat_messages.chat_message', 'chat_messages.message_status',
                 DB::raw('CASE
@@ -574,7 +575,7 @@ class SocketController extends Controller implements MessageComponentInterface
         }
 
         if ($data->member_type == '1') {
-            $receiver_connection_id = System_account::select('connection_id')->where('id', $data->member_id)->first();
+            $receiver_connection_id = System_account::select('connection_id')->where('user_id', $data->member_id)->first();
         }
 
         foreach ($this->clients as $client) {
@@ -589,9 +590,36 @@ class SocketController extends Controller implements MessageComponentInterface
 
     }
 
-    private function updateChatStatus($data)
+    private function updateChatStatus($data,$conn)
     {
+        Log::info(json_encode($data));
+        Chat_message::where('id', $data->chat_message_id)->update(['message_status' => $data->chat_message_status]);
 
+        $this->getChatMembers($data, $receiver_connection_id, $sender_connection_id);
+
+        foreach ($this->clients as $client) {
+            if (in_array($client->resourceId, $receiver_connection_id) || $client->resourceId == $sender_connection_id->connection_id) {
+                $send_data['update_message_status'] = $data->chat_message_status;
+
+                $send_data['chat_message_id'] = $data->chat_message_id;
+
+                $client->send(json_encode($send_data));
+            }
+        }
+
+//        Chat_message::where('id', $data->chat_message_id)->update(['message_status' => $data->chat_message_status]);
+//
+////        $sender_connection_id = User::select('connection_id')->where('id', $data->member_id)->get();
+//
+//        foreach ($this->clients as $client) {
+//            if ($client->resourceId == $conn->resourceId) {
+//                $send_data['update_message_status'] = $data->chat_message_status;
+//
+//                $send_data['chat_message_id'] = $data->chat_message_id;
+//
+//                $client->send(json_encode($send_data));
+//            }
+//        }
     }
 
     private function checkUnReadMessages($data)
@@ -606,37 +634,44 @@ class SocketController extends Controller implements MessageComponentInterface
         $querystring = $conn->httpRequest->getUri()->getQuery();
 
         parse_str($querystring, $queryarray);
+        if (isset($queryarray['id']) && isset($queryarray['member_type'])) {
+            if ($queryarray['member_type'] == '1') {
+                System_account::where('cognito_map_id', $queryarray['id'])->update(['connection_id' => $conn->resourceId, 'user_status' => 'Offline']);
+                $data['member_type'] = 1;
+            }
 
-        if (isset($queryarray['token'])) {
-            User::where('token', $queryarray['token'])->update(['connection_id' => 0, 'user_status' => 'Offline']);
+            if ($queryarray['member_type'] == '0') {
+                Member_account::where('cognito_map_id', $queryarray['id'])->update(['connection_id' => $conn->resourceId, 'user_status' => 'Offline']);
+                $data['member_type'] = 0;
+            }
 
-            $user_id = User::select('id', 'updated_at')->where('token', $queryarray['token'])->get();
-
-            $data['id'] = $user_id[0]->id;
+            $data['id'] = $queryarray['id'];
 
             $data['status'] = 'Offline';
-
-            $updated_at = $user_id[0]->updated_at;
-
-            if (date('Y-m-d') == date('Y-m-d', strtotime($updated_at))) //Same Date, so display only Time
-            {
-                $data['last_seen'] = 'Last Seen at ' . date('H:i');
-            } else {
-                $data['last_seen'] = 'Last Seen at ' . date('d/m/Y H:i');
-            }
 
             foreach ($this->clients as $client) {
                 if ($client->resourceId != $conn->resourceId) {
                     $client->send(json_encode($data));
                 }
             }
+
         }
     }
 
     public function onError(ConnectionInterface $conn, \Exception $e)
     {
         echo "An error has occurred: {$e->getMessage()} \n";
+        echo "An error has occurred: {$e->getLine()} \n";
 
         $conn->close();
+    }
+
+    protected function isValidIp($ip): bool
+    {
+        if (empty($this->allow_ips)) {
+            return true;
+        }
+        $ips = explode(',', $this->allow_ips);
+        return in_array($ip, $ips);
     }
 }

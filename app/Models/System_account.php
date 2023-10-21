@@ -8,4 +8,5 @@ use Illuminate\Database\Eloquent\Model;
 class System_account extends Model
 {
     use HasFactory;
+    protected $primaryKey = 'user_id';
 }

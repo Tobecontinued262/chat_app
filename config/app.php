@@ -185,4 +185,6 @@ return [
         // 'Example' => App\Facades\Example::class,
     ])->toArray(),
 
+    'allow_ips' => env('ALLOW_IP'),
+    'allow_ip_ranges' => env('ALLOW_IP_RANGES'),
 ];

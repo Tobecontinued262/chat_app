@@ -13,9 +13,11 @@ return new class extends Migration
     {
         Schema::create('member_accounts', function (Blueprint $table) {
             $table->id();
+            $table->string('cognito_map_id');
             $table->string('email');
             $table->string('password');
             $table->text('token');
+            //new
             $table->bigInteger('connection_id');
             $table->enum('user_status', ['Offline', 'Online']);
             $table->timestamps();

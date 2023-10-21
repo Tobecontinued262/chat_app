@@ -13,11 +13,11 @@ return new class extends Migration
     {
         Schema::create('chat_members', function (Blueprint $table) {
             $table->bigInteger('chat_room_id');
-            $table->bigInteger('user_id');
-            $table->bigInteger('admin_id');
+            $table->bigInteger('member_id');
+            $table->tinyInteger('member_type');
             $table->enum('notification_setting', ['ON', 'OFF']);
             $table->timestamps();
-            $table->primary(['chat_room_id', 'user_id', 'admin_id']);
+            $table->primary(['chat_room_id', 'member_id', 'member_type']);
         });
     }
 
